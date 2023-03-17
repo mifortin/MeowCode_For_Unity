@@ -1,5 +1,5 @@
 {
-    "name": "new.mifortin.MeowCode.Editor",
+    "name": "new.mifortin.MeowCode.Runtime",
     "rootNamespace": "",
     "references": [],
     "includePlatforms": [],

@@ -22,7 +22,7 @@ class MeowCodeHooks : Editor
 			+= CompilationPipelineOncompilationStarted;
 	}
 
-	private static string key = "/* --[GENERATED]-- */";
+	private static string key = "meowcode";
 	private static char[] whitespace = { ' ', '\t',';' };
 	private static HashSet<string> protection = new HashSet<string>{ "public", "protected", "private"};
 
@@ -30,7 +30,25 @@ class MeowCodeHooks : Editor
 	{
 		string[] allLines =File.ReadAllLines(fileName);
 
-		var original = allLines.Where(s => !s.StartsWith(key)).ToList();
+		var original = new List<string>();
+
+		bool bInMeowBlock = false;
+		foreach (string s in allLines)
+		{
+			if (s == "#region " + key)
+			{
+				bInMeowBlock = true;
+			}
+			else if (s == "#endregion " + key)
+			{
+				bInMeowBlock = false;
+			}
+			else if (!bInMeowBlock)
+			{
+				original.Add(s);
+			}
+		}
+		
 		var generated = new List<string>();
 
 		var disposables = new List<string>();
@@ -40,17 +58,29 @@ class MeowCodeHooks : Editor
 		{
 			if (bAutoDispose && s.StartsWith("}"))
 			{
-				generated.Add(key + "	public void Dispose()");
-				generated.Add(key + "	{");
+				generated.Add("#region " + key);
 				foreach (var d in disposables)
 				{
-					generated.Add(key + "		if ("+d+" != null)");
-					generated.Add(key + "		{");
-					generated.Add(key + "			" + d + ".Dispose();");
-					generated.Add(key + "			" + d + " = null;");
-					generated.Add(key + "		}");
+					generated.Add("	private bool bDidDispose_" + d + " = false;");
 				}
-				generated.Add(key + "	}");
+
+				generated.Add("	public void Dispose()");
+				generated.Add("	{");
+				generated.Add("		Dispose(true);");
+				generated.Add("	}");
+				
+				generated.Add("	protected virtual void Dispose(bool bDisposing)");
+				generated.Add("	{");
+				foreach (var d in disposables)
+				{
+					generated.Add("		if (!bDidDispose_" + d + ")");
+					generated.Add("		{");
+					generated.Add("			" + d + ".Dispose();");
+					generated.Add("			bDidDispose_" + d + " = true;");
+					generated.Add("		}");
+				}
+				generated.Add("	}");
+				generated.Add("#endregion " + key);
 			}
 
 			generated.Add(s);
@@ -131,21 +161,24 @@ class MeowCodeHooks : Editor
 
 	private static void CompilationPipelineOncompilationStarted(object obj)
 	{
-		HashSet<string> knownDisposables = new HashSet<string>();
-		knownDisposables.Add("NativeArray");
-		
-		var Files = System.IO.Directory.EnumerateFiles(
-			Application.dataPath,
-			"*.cs",
-			SearchOption.AllDirectories);
-		foreach (string F in Files)
+		if (MeowCodeMenu.IsCodeGenEnable())
 		{
-			if (F.Contains("Editor"))
-			{
-				continue;
-			}
+			HashSet<string> knownDisposables = new HashSet<string>();
+			knownDisposables.Add("NativeArray");
 
-			ProcessFile(F, knownDisposables);
+			var Files = System.IO.Directory.EnumerateFiles(
+				Application.dataPath,
+				"*.cs",
+				SearchOption.AllDirectories);
+			foreach (string F in Files)
+			{
+				if (F.Contains("Editor"))
+				{
+					continue;
+				}
+
+				ProcessFile(F, knownDisposables);
+			}
 		}
 	}
 }
