@@ -5,7 +5,7 @@
 using System;
 
 /// <summary>
-/// IDisposable where we are allowed to auto add / remove disposables
+/// IDisposable notes an object (or series of objects) where the dispose method should be generated.
 /// </summary>
 public interface IAutoDisposable : IDisposable
 {

@@ -7,34 +7,34 @@ using UnityEngine;
 
 public class MeowCodeMenu : MonoBehaviour
 {
-	private static bool bEnableCodeGen = false;
-
+	private static string key = "bMeowCodeEnable";
+	
 	static public bool IsCodeGenEnable()
 	{
-		return bEnableCodeGen;
+		return PlayerPrefs.HasKey(key) && PlayerPrefs.GetInt(key) != 0 ;
 	}
 
 	[MenuItem("MeowCode/Enable")]
 	static void DoEnable()
 	{
-		bEnableCodeGen = true;
+		PlayerPrefs.SetInt(key, 1);
 	}
 
 	[MenuItem("MeowCode/Disable")]
 	static void DoDisable()
 	{
-		bEnableCodeGen = false;
+		PlayerPrefs.SetInt(key, 0);
 	}
 
 	[MenuItem("MeowCode/Enable", true)]
 	static bool OnValidateEnable()
 	{
-		return !bEnableCodeGen;
+		return !IsCodeGenEnable();
 	}
 	
 	[MenuItem("MeowCode/Disable", true)]
 	static bool OnValidateDisable()
 	{
-		return bEnableCodeGen;
+		return IsCodeGenEnable();
 	}
 }

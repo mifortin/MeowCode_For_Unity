@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 using File = System.IO.File;
@@ -23,10 +24,35 @@ class MeowCodeHooks : Editor
 	}
 
 	private static string key = "meowcode";
-	private static char[] whitespace = { ' ', '\t',';' };
+	private static char[] singles = { '.','{' , '}', '+', '$', '(', ')', ';' , ',', '[', ']','<', '>'};
 	private static HashSet<string> protection = new HashSet<string>{ "public", "protected", "private"};
 
-	private static void ProcessFile(string fileName, HashSet<string> knownDisposables)
+	struct Token
+	{
+		public string text;
+		public int line;
+	}
+
+
+	static void SkipBlock(ref List<Token>.Enumerator Enum)
+	{
+		if (Enum.Current.text != "{") return;
+
+		while (Enum.MoveNext())
+		{
+			if (Enum.Current.text == "}")
+			{
+				return;
+			}
+			if (Enum.Current.text == "{")
+			{
+				SkipBlock(ref Enum);
+			}
+		}
+	}
+	
+	
+	private static void ProcessFile(string fileName, Dictionary<string, List<string>> knownDisposables)
 	{
 		string[] allLines =File.ReadAllLines(fileName);
 
@@ -49,122 +75,284 @@ class MeowCodeHooks : Editor
 			}
 		}
 		
-		var generated = new List<string>();
 
-		var disposables = new List<string>();
-		
-		bool bAutoDispose = false;
+		var Tokens = new List<Token>();
+		var line = 0;
 		foreach (string s in original)
 		{
-			if (bAutoDispose && s.StartsWith("}"))
+			int start = 0;
+			int cur = 0;
+			
+			while (cur < s.Length && (s[start] == ' ' || s[start] == '\t'))
 			{
-				generated.Add("#region " + key);
-				foreach (var d in disposables)
-				{
-					generated.Add("	private bool bDidDispose_" + d + " = false;");
-				}
-
-				generated.Add("	public void Dispose()");
-				generated.Add("	{");
-				generated.Add("		Dispose(true);");
-				generated.Add("	}");
-				
-				generated.Add("	protected virtual void Dispose(bool bDisposing)");
-				generated.Add("	{");
-				foreach (var d in disposables)
-				{
-					generated.Add("		if (!bDidDispose_" + d + ")");
-					generated.Add("		{");
-					generated.Add("			" + d + ".Dispose();");
-					generated.Add("			bDidDispose_" + d + " = true;");
-					generated.Add("		}");
-				}
-				generated.Add("	}");
-				generated.Add("#endregion " + key);
+				start++;
+				cur++;
 			}
 
-			generated.Add(s);
-
-			if (s.Contains("class"))
+			while (cur < s.Length-1)
 			{
-				if (s.Contains("IAutoDisposable"))
+				while (cur < s.Length-1 && (s[start] == ' ' || s[start] == '\t'))
 				{
-					bAutoDispose = true;
+					start++;
+					cur++;
 				}
-				else
-				{
-					bAutoDispose = false;
-				}
-			}
-			else
-			{
-				string[] parts = s.Split(whitespace, StringSplitOptions.RemoveEmptyEntries);
 
-				bool bNextIsName = false;
-				string foundName = "";
-				foreach (string p in parts)
+				bool bComment = false;
+				while (cur < s.Length-1)
 				{
-					if (protection.Contains(p))	continue;
-
-					if (bNextIsName)
+					if (s[cur] == '/' && s[cur + 1] == '/')
 					{
-						if (foundName == "")
-							foundName = p;
-						else
-						{
-							if (p == "=")
-								break;
-
-							if (p.StartsWith("("))
-							{
-								foundName = "";
-								break;
-							}
-						}
-						continue;
-					}
-					
-					if (p.Contains("("))
+						bComment = true;
 						break;
+					}
 
-					string[] typeNameMaybe = p.Split('<');
-					if (!knownDisposables.Contains(typeNameMaybe[0])) break;
-					else bNextIsName = true;
-					
+					var n = s[cur + 1];
+					if (n == ' ' || n == '\t')
+					{
+						var nt = new Token();
+						nt.line = line;
+						nt.text = s.Substring(start, cur - start + 1);
+						Tokens.Add(nt);
+						cur++;
+						start = cur;
+						break;
+					}
+
+					if (singles.Contains(n))
+					{
+						var nt = new Token();
+						nt.line = line;
+						nt.text = s.Substring(start, cur - start + 1);
+						Tokens.Add(nt);
+						
+						cur++;
+						start = cur;
+						
+						nt = new Token();
+						nt.line = line;
+						nt.text = s.Substring(start, cur - start + 1);
+						Tokens.Add(nt);
+
+						cur++;
+						start = cur;
+					}
+					else
+					{
+						cur++;
+					}
 				}
 
-				if (foundName != "") disposables.Add(foundName);
-			}
-		}
-
-		if (allLines.Length == generated.Count)
-		{
-			bool bAllTheSame = true;
-			for (int i = 0; i < allLines.Length; i++)
-			{
-				if (allLines[i] != generated[i])
+				if (bComment)
 				{
-					bAllTheSame = false;
 					break;
 				}
 			}
 
-			if (bAllTheSame)
+			if (start < s.Length)
 			{
-				return;
+				var nt = new Token();
+				nt.line = line;
+				nt.text = s.Substring(start, s.Length - start);
+				Tokens.Add(nt);
+			}
+			
+			line++;
+		}
+
+		string className = "";
+		int lineOfDisposeEnd = -1;
+		var Enum = Tokens.GetEnumerator();
+		while (true)
+		{
+			if (Enum.Current.text == "using")
+			{
+				while (Enum.MoveNext())
+				{
+					if (Enum.Current.text == ";")
+						break;
+				}
+				Enum.MoveNext();
+			}
+			else if (Enum.Current.text == "class" || Enum.Current.text == "struct")
+			{
+				Enum.MoveNext();
+
+				if (!knownDisposables.ContainsKey(Enum.Current.text))
+				{
+					return;
+				}
+
+				className = Enum.Current.text;
+
+				Enum.MoveNext();
+
+				if (Enum.Current.text == "<")
+				{
+					while (Enum.Current.text != ">")
+					{
+						Enum.MoveNext();
+					}
+
+					Enum.MoveNext();
+				}
+
+				if (Enum.Current.text == ":")
+				{
+					do
+					{
+						Enum.MoveNext();
+
+						if (Enum.Current.text == "IDisposable")
+						{
+							return;
+						}
+
+						Enum.MoveNext();
+					} while (Enum.Current.text == ",");
+				}
+
+				if (Enum.Current.text == "{")
+				{
+					Enum.MoveNext();
+					do
+					{
+						if (protection.Contains(Enum.Current.text))
+						{
+							Enum.MoveNext();
+						}
+						else if (Enum.Current.text == "void")
+						{
+							Enum.MoveNext();
+							if (Enum.Current.text == "Dispose")
+							{
+								while (Enum.MoveNext())
+								{
+									if (Enum.Current.text == "{")
+									{
+										SkipBlock(ref Enum);
+										lineOfDisposeEnd = Enum.Current.line;
+										break;;
+									}
+								}
+							}
+						}
+						else if (Enum.Current.text == "{")
+						{
+							SkipBlock(ref Enum);
+							Enum.MoveNext();
+						}
+						else
+						{
+							Enum.MoveNext();
+						}
+					} while (Enum.Current.text != "}");
+				}
+			}
+			else if (!Enum.MoveNext())
+			{
+				break;
 			}
 		}
 		
-		Debug.Log($"{fileName} Generated lines: {generated.Count} ({allLines.Length}/{original.Count})");
-		File.WriteAllLines(fileName, generated);
+
+		/*foreach (var T in Tokens)
+		{
+			Debug.Log($"{fileName} {T.text} {T.line}");
+		}*/
+
+		if (lineOfDisposeEnd > 0)
+		{
+			var generated = new List<string>();
+
+			int i = 0;
+			foreach (string s in original)
+			{
+				generated.Add(s);
+				
+				if (i == lineOfDisposeEnd)
+				{
+					generated.Add("#region " + key);
+					foreach (string disp in knownDisposables[className])
+					{
+						generated.Add($"\tprivate bool _meowDisposed_{disp} = false;");
+					}
+					generated.Add("\tprotected virtual void Dispose(bool disposing)");
+					generated.Add("\t{");
+					foreach (string disp in knownDisposables[className])
+					{
+						generated.Add($"\t\tif (!_meowDisposed_{disp})");
+						generated.Add("\t\t{");
+						generated.Add($"\t\t\t{disp}.Dispose();");
+						generated.Add($"\t\t\t_meowDisposed_{disp} = true;");
+						generated.Add("\t\t}");
+					}
+					generated.Add("\t}");
+					generated.Add("");
+					generated.Add($"\t~{className}() => Dispose(false);");
+					generated.Add("#endregion " + key);
+				}
+				i += 1;
+
+				if (i == lineOfDisposeEnd)
+				{
+					generated.Add("#region " + key);
+					generated.Add("\t\tDispose(true);");
+					generated.Add("\t\t GC.SuppressFinalize(this);");
+					generated.Add("#endregion " + key);
+				}
+			}
+
+			if (generated.Count == allLines.Length)
+			{
+				bool bIsIdentical = true;
+				for (int j = 0; i < generated.Count; i++)
+				{
+					if (generated[i] != allLines[i])
+					{
+						bIsIdentical = false;
+						break;
+					}
+				}
+
+				if (bIsIdentical)
+				{
+					return;
+				}
+			}
+			
+			Debug.Log(
+				$"{fileName} / {lineOfDisposeEnd} Generated lines: {generated.Count} ({allLines.Length}/{original.Count})");
+			File.WriteAllLines(fileName, generated);
+		}
 	}
 
 	private static void CompilationPipelineOncompilationStarted(object obj)
 	{
 		if (MeowCodeMenu.IsCodeGenEnable())
 		{
-			HashSet<string> knownDisposables = new HashSet<string>();
-			knownDisposables.Add("NativeArray");
+			// For every type deriving from IAutoDisposable, keep track of the disposables within
+			var AutoDisposables = new Dictionary<string, List<string>>();
+
+			foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+			{
+				foreach (Type t in a.GetTypes())
+				{
+					if (typeof(IAutoDisposable).IsAssignableFrom(t) && !t.IsInterface)
+					{
+						var foundDisposables = new List<String>();
+
+						foreach (var member in t.GetFields(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance))
+						{
+							if (typeof(IDisposable).IsAssignableFrom(member.FieldType))
+							{
+								foundDisposables.Add(member.Name);
+							}
+						}
+						
+						AutoDisposables.Add(t.Name, foundDisposables);
+					}
+				}
+			}
 
 			var Files = System.IO.Directory.EnumerateFiles(
 				Application.dataPath,
@@ -177,7 +365,14 @@ class MeowCodeHooks : Editor
 					continue;
 				}
 
-				ProcessFile(F, knownDisposables);
+				try
+				{
+					ProcessFile(F, AutoDisposables);
+				}
+				catch (Exception e)
+				{
+					Debug.LogError(e.ToString());
+				}
 			}
 		}
 	}

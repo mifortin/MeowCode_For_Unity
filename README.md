@@ -4,7 +4,11 @@ IN DEVELOPMENT!  DO NOT USE!
 
 This is a simple code generator that I'm hacking away at for some personal projects.
 
+C# is a minefield when it comes to memory management it seems.  Specially with structs +
 
+The goal of this project is to provide sufficiently good code generator so we may have
+smart-pointer-like objects.  For example, a file would "auto dispose" at end of whatever
+scope it's in.
 
 # Warning
 
@@ -17,6 +21,11 @@ files while developing this tool.
 # Features
 ## IAutoDisposable
 
-Objects that derive from IAutoDisposable will have their dispose methods
-created for them within a region entitled "meowcode".
+Provided a "Disposable" method and if the object derives from IAutoDisposable,
+the following will be generated:
+* A Dispose(bool) method
+* A finalizer calling the Dispose(bool) method
+* Code inside Dispose() to suppress the GC and call Dispose(bool)
+
+(trying to follow best practices from https://learn.microsoft.com/en-us/dotnet/standard/garbage-collection/implementing-dispose)
 
