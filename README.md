@@ -17,6 +17,13 @@ This module will alter existing source files.  There is a risk of broken code.
 Do use source control, do keep backups.  I accidentally wiped some of my C#
 files while developing this tool.
 
+# Enabling
+In Unity, this plugin will add a "MeowCode" menu.  Click "Enable"; then change a file.
+On recompile, new code will be generated.
+
+If a compile error happens, turn off the system and resolve the issue.  Compile errores
+prevent the plugin from compiling updates and the old version will emit code putting the
+project in a very bad state of "impossible to fix unless disabled".
 
 # Features
 ## IAutoDisposable
