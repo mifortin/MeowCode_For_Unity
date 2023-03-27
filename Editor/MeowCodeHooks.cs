@@ -24,13 +24,20 @@ class MeowCodeHooks : Editor
 	}
 
 	private static string key = "meowcode";
-	private static char[] singles = { '.','{' , '}', '+', '$', '(', ')', ';' , ',', '[', ']','<', '>'};
-	private static HashSet<string> protection = new HashSet<string>{ "public", "protected", "private"};
+	private static char[] singles = { '.', '{', '}', '+', '$', '(', ')', ';', ',', '[', ']', '<', '>' };
+	private static HashSet<string> protection = new HashSet<string> { "public", "protected", "private" };
 
 	struct Token
 	{
 		public string text;
 		public int line;
+	}
+
+
+	struct DispoableClassData
+	{
+		public Type type;
+		public List<FieldInfo> DisposableMembers;
 	}
 
 
@@ -52,7 +59,7 @@ class MeowCodeHooks : Editor
 	}
 	
 	
-	private static void ProcessFile(string fileName, Dictionary<string, List<string>> knownDisposables)
+	private static void ProcessFile(string fileName, Dictionary<string, DispoableClassData> knownDisposables)
 	{
 		string[] allLines =File.ReadAllLines(fileName);
 
@@ -272,18 +279,18 @@ class MeowCodeHooks : Editor
 				if (i == lineOfDisposeEnd)
 				{
 					generated.Add("#region " + key);
-					foreach (string disp in knownDisposables[className])
+					foreach (var disp in knownDisposables[className].DisposableMembers)
 					{
-						generated.Add($"\tprivate bool _meowDisposed_{disp} = false;");
+						generated.Add($"\tprivate bool _meowDisposed_{disp.Name} = false;");
 					}
 					generated.Add("\tprotected virtual void Dispose(bool disposing)");
 					generated.Add("\t{");
-					foreach (string disp in knownDisposables[className])
+					foreach (var disp in knownDisposables[className].DisposableMembers)
 					{
-						generated.Add($"\t\tif (!_meowDisposed_{disp})");
+						generated.Add($"\t\tif (!_meowDisposed_{disp.Name})");
 						generated.Add("\t\t{");
-						generated.Add($"\t\t\t{disp}.Dispose();");
-						generated.Add($"\t\t\t_meowDisposed_{disp} = true;");
+						generated.Add($"\t\t\t{disp.Name}.Dispose();");
+						generated.Add($"\t\t\t_meowDisposed_{disp.Name} = true;");
 						generated.Add("\t\t}");
 					}
 					generated.Add("\t}");
@@ -331,7 +338,7 @@ class MeowCodeHooks : Editor
 		if (MeowCodeMenu.IsCodeGenEnable())
 		{
 			// For every type deriving from IAutoDisposable, keep track of the disposables within
-			var AutoDisposables = new Dictionary<string, List<string>>();
+			var AutoDisposables = new Dictionary<string, DispoableClassData>();
 
 			foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
 			{
@@ -339,17 +346,24 @@ class MeowCodeHooks : Editor
 				{
 					if (typeof(IAutoDisposable).IsAssignableFrom(t) && !t.IsInterface)
 					{
-						var foundDisposables = new List<String>();
+						var classData = new DispoableClassData();
+						var foundDisposables = new List<FieldInfo>();
 
-						foreach (var member in t.GetFields(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance))
+						foreach (var member in t.GetFields(
+							         BindingFlags.NonPublic 
+							         | BindingFlags.Public
+							         | BindingFlags.Instance
+							         | BindingFlags.DeclaredOnly))
 						{
 							if (typeof(IDisposable).IsAssignableFrom(member.FieldType))
 							{
-								foundDisposables.Add(member.Name);
+								foundDisposables.Add(member);
 							}
 						}
-						
-						AutoDisposables.Add(t.Name, foundDisposables);
+
+						classData.type = t;
+						classData.DisposableMembers = foundDisposables;
+						AutoDisposables.Add(t.Name, classData);
 					}
 				}
 			}

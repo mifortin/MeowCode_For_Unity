@@ -14,25 +14,25 @@ public class MeowCodeMenu : MonoBehaviour
 		return PlayerPrefs.HasKey(key) && PlayerPrefs.GetInt(key) != 0 ;
 	}
 
-	[MenuItem("MeowCode/Enable")]
+	[MenuItem("MeowCode/Disabled => Enabled")]
 	static void DoEnable()
 	{
 		PlayerPrefs.SetInt(key, 1);
 	}
 
-	[MenuItem("MeowCode/Disable")]
+	[MenuItem("MeowCode/Enabled => Disabled")]
 	static void DoDisable()
 	{
 		PlayerPrefs.SetInt(key, 0);
 	}
 
-	[MenuItem("MeowCode/Enable", true)]
+	[MenuItem("MeowCode/Disabled => Enabled", true)]
 	static bool OnValidateEnable()
 	{
 		return !IsCodeGenEnable();
 	}
 	
-	[MenuItem("MeowCode/Disable", true)]
+	[MenuItem("MeowCode/Enabled => Disabled", true)]
 	static bool OnValidateDisable()
 	{
 		return IsCodeGenEnable();
