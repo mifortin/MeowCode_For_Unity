@@ -37,4 +37,16 @@ public class MeowCodeMenu : MonoBehaviour
 	{
 		return IsCodeGenEnable();
 	}
+
+	[MenuItem("MeowCode/Generate Code")]
+	static void OnGenerateCode()
+	{
+		MeowCodeHooks.OnRegenerateCodeRequested();
+	}
+
+	[MenuItem("MeowCode/Clear Generated Code")]
+	static void OnClearGeneratedCode()
+	{
+		MeowCodeHooks.OnClearGeneratedCodeRequested();
+	}
 }

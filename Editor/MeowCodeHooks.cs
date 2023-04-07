@@ -390,4 +390,14 @@ class MeowCodeHooks : Editor
 			}
 		}
 	}
+
+	public static void OnRegenerateCodeRequested()
+	{
+		CompilationPipelineOncompilationStarted(null);
+	}
+
+	public static void OnClearGeneratedCodeRequested()
+	{
+		
+	}
 }

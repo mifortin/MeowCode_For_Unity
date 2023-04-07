@@ -1,7 +1,7 @@
 {
-    "name": "new.mifortin.MeowCode.Editor",
+    "name": "net.mifortin.MeowCode.Editor",
     "rootNamespace": "",
-    "references": ["GUID:3ca0c0a9d9ff64e3c89b0a3027a61904"],
+    "references": ["GUID:3ca0c0a9d9ff64e3c89b0a3027a61904","GUID:3e3916d2bbe61463bb693ef0925d293d"],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
