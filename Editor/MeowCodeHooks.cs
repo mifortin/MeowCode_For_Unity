@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
+using UnityEditor.Build.Content;
 using UnityEngine;
 using File = System.IO.File;
 
@@ -127,14 +128,19 @@ class MeowCodeHooks : Editor
 
 					if (singles.Contains(n))
 					{
+						// Close current token that we've been accumulating.
 						var nt = new Token();
-						nt.line = line;
-						nt.text = s.Substring(start, cur - start + 1);
-						Tokens.Add(nt);
-						
+						if (cur != start)
+						{
+							nt.line = line;
+							nt.text = s.Substring(start, cur - start + 1);
+							Tokens.Add(nt);
+						}
+
 						cur++;
 						start = cur;
 						
+						// Add the single token afterwards.
 						nt = new Token();
 						nt.line = line;
 						nt.text = s.Substring(start, cur - start + 1);
@@ -142,6 +148,13 @@ class MeowCodeHooks : Editor
 
 						cur++;
 						start = cur;
+						
+						// Skip whitespace, just in case.
+						while (cur < s.Length-1 && (s[start] == ' ' || s[start] == '\t'))
+						{
+							start++;
+							cur++;
+						}
 					}
 					else
 					{
@@ -165,10 +178,20 @@ class MeowCodeHooks : Editor
 			
 			line++;
 		}
+		
+		/*    // Uncomment to diagnose token generation.
+		Debug.Log(fileName);
+		foreach (var T in Tokens)
+		{
+			Debug.Log($"{fileName} {T.text} {T.line}");
+		}
+		/* */
 
+		var linesOfConstructors = new HashSet<int>();
 		string className = "";
 		int lineOfDisposeEnd = -1;
 		var Enum = Tokens.GetEnumerator();
+		bool isClass = false;
 		while (true)
 		{
 			if (Enum.Current.text == "using")
@@ -182,10 +205,13 @@ class MeowCodeHooks : Editor
 			}
 			else if (Enum.Current.text == "class" || Enum.Current.text == "struct")
 			{
+				isClass = Enum.Current.text == "class";
+				
 				Enum.MoveNext();
-
+				
 				if (!knownDisposables.ContainsKey(Enum.Current.text))
 				{
+					//Debug.Log($"{fileName}: {Enum.Current.text} did not match any known disposables!");
 					return;
 				}
 
@@ -193,6 +219,7 @@ class MeowCodeHooks : Editor
 
 				Enum.MoveNext();
 
+				Debug.Log($"{Enum.Current.text}");
 				if (Enum.Current.text == "<")
 				{
 					while (Enum.Current.text != ">")
@@ -203,19 +230,50 @@ class MeowCodeHooks : Editor
 					Enum.MoveNext();
 				}
 
+				Debug.Log($"'{Enum.Current.text}'");
 				if (Enum.Current.text == ":")
 				{
 					do
 					{
 						Enum.MoveNext();
+						Debug.Log($"{Enum.Current.text}");
 
 						if (Enum.Current.text == "IDisposable")
 						{
+							//Debug.Log($"{fileName} is Disposable, not IAutoDisposable!");
 							return;
 						}
 
 						Enum.MoveNext();
+						Debug.Log($"{Enum.Current.text}");
 					} while (Enum.Current.text == ",");
+				}
+				
+				Debug.Log($"{Enum.Current.text}");
+				while (Enum.Current.text == "where")
+				{
+					Enum.MoveNext();
+					string GenericName = Enum.Current.text;		// TYPE of where
+
+					Enum.MoveNext();		// Should be :
+					if (Enum.Current.text != ":")
+					{
+						Debug.LogError($"{fileName}: Expected : after where {GenericName}");
+						return;
+					}
+
+					Enum.MoveNext();	// Name of type
+					Enum.MoveNext();	// Next token is brace
+					
+					if (Enum.Current.text == "<")
+					{
+						while (Enum.Current.text != ">")
+						{
+							Enum.MoveNext();
+						}
+
+						Enum.MoveNext();
+					}
 				}
 
 				if (Enum.Current.text == "{")
@@ -243,6 +301,18 @@ class MeowCodeHooks : Editor
 								}
 							}
 						}
+						else if (Enum.Current.text == className)
+						{
+							while (Enum.Current.text != "{")
+							{
+								Enum.MoveNext();
+							}
+
+							linesOfConstructors.Add(Enum.Current.line);
+							
+							SkipBlock(ref Enum);
+							Enum.MoveNext();
+						}
 						else if (Enum.Current.text == "{")
 						{
 							SkipBlock(ref Enum);
@@ -254,18 +324,17 @@ class MeowCodeHooks : Editor
 						}
 					} while (Enum.Current.text != "}");
 				}
+				else
+				{
+					Debug.LogError($"{fileName}: Unable to find class body for {className}, got {Enum.Current.text} at {Enum.Current.line} instead");
+					return;
+				}
 			}
 			else if (!Enum.MoveNext())
 			{
 				break;
 			}
 		}
-		
-
-		/*foreach (var T in Tokens)
-		{
-			Debug.Log($"{fileName} {T.text} {T.line}");
-		}*/
 
 		if (lineOfDisposeEnd > 0)
 		{
@@ -281,9 +350,18 @@ class MeowCodeHooks : Editor
 					generated.Add("#region " + key);
 					foreach (var disp in knownDisposables[className].DisposableMembers)
 					{
-						generated.Add($"\tprivate bool _meowDisposed_{disp.Name} = false;");
+						generated.Add($"\tprivate bool _meowDisposed_{disp.Name};");
 					}
-					generated.Add("\tprotected virtual void Dispose(bool disposing)");
+
+					if (isClass)
+					{
+						generated.Add("\tprotected virtual void Dispose(bool disposing)");
+					}
+					else
+					{
+						generated.Add("\tprivate void Dispose(bool disposing)");
+					}
+
 					generated.Add("\t{");
 					foreach (var disp in knownDisposables[className].DisposableMembers)
 					{
@@ -295,7 +373,11 @@ class MeowCodeHooks : Editor
 					}
 					generated.Add("\t}");
 					generated.Add("");
-					generated.Add($"\t~{className}() => Dispose(false);");
+					if (isClass)
+					{
+						generated.Add($"\t~{className}() => Dispose(false);");
+					}
+
 					generated.Add("#endregion " + key);
 				}
 				i += 1;
@@ -307,14 +389,25 @@ class MeowCodeHooks : Editor
 					generated.Add("\t\t GC.SuppressFinalize(this);");
 					generated.Add("#endregion " + key);
 				}
+
+				if (linesOfConstructors.Contains(i-1))
+				{
+					generated.Add("#region " + key);
+					foreach (var disp in knownDisposables[className].DisposableMembers)
+					{
+						generated.Add($"\t\t_meowDisposed_{disp.Name} = false;");
+					}
+
+					generated.Add("#endregion " + key);
+				}
 			}
 
 			if (generated.Count == allLines.Length)
 			{
 				bool bIsIdentical = true;
-				for (int j = 0; i < generated.Count; i++)
+				for (int j = 0; j < generated.Count; j++)
 				{
-					if (generated[i] != allLines[i])
+					if (generated[j] != allLines[j])
 					{
 						bIsIdentical = false;
 						break;
@@ -333,67 +426,82 @@ class MeowCodeHooks : Editor
 		}
 	}
 
+
+	private static string CleanName(string s)
+	{
+		return s.Contains("`") ? s.Split('`')[0] : s;
+	}
+	
+
+	private static void DoGenerateCode()
+	{
+		// For every type deriving from IAutoDisposable, keep track of the disposables within
+		var AutoDisposables = new Dictionary<string, DispoableClassData>();
+
+		foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
+		{
+			foreach (Type t in a.GetTypes())
+			{
+				if (typeof(IAutoDisposable).IsAssignableFrom(t) && !t.IsInterface)
+				{
+					var classData = new DispoableClassData();
+					var foundDisposables = new List<FieldInfo>();
+
+					foreach (var member in t.GetFields(
+						         BindingFlags.NonPublic 
+						         | BindingFlags.Public
+						         | BindingFlags.Instance
+						         | BindingFlags.DeclaredOnly))
+					{
+						if (typeof(IDisposable).IsAssignableFrom(member.FieldType))
+						{
+							foundDisposables.Add(member);
+						}
+					}
+
+					string className = CleanName(t.Name);
+					//Debug.Log($"Adding disposible <{className}>");
+					classData.type = t;
+					classData.DisposableMembers = foundDisposables;
+					AutoDisposables.Add(className, classData);
+				}
+			}
+		}
+
+		var Files = System.IO.Directory.EnumerateFiles(
+			Application.dataPath,
+			"*.cs",
+			SearchOption.AllDirectories);
+		foreach (string F in Files)
+		{
+			if (F.Contains("Editor"))
+			{
+				continue;
+			}
+
+			try
+			{
+				ProcessFile(F, AutoDisposables);
+			}
+			catch (Exception e)
+			{
+				Debug.LogError(e.ToString());
+			}
+		}
+	}
+	
+
 	private static void CompilationPipelineOncompilationStarted(object obj)
 	{
 		if (MeowCodeMenu.IsCodeGenEnable())
 		{
-			// For every type deriving from IAutoDisposable, keep track of the disposables within
-			var AutoDisposables = new Dictionary<string, DispoableClassData>();
-
-			foreach (Assembly a in AppDomain.CurrentDomain.GetAssemblies())
-			{
-				foreach (Type t in a.GetTypes())
-				{
-					if (typeof(IAutoDisposable).IsAssignableFrom(t) && !t.IsInterface)
-					{
-						var classData = new DispoableClassData();
-						var foundDisposables = new List<FieldInfo>();
-
-						foreach (var member in t.GetFields(
-							         BindingFlags.NonPublic 
-							         | BindingFlags.Public
-							         | BindingFlags.Instance
-							         | BindingFlags.DeclaredOnly))
-						{
-							if (typeof(IDisposable).IsAssignableFrom(member.FieldType))
-							{
-								foundDisposables.Add(member);
-							}
-						}
-
-						classData.type = t;
-						classData.DisposableMembers = foundDisposables;
-						AutoDisposables.Add(t.Name, classData);
-					}
-				}
-			}
-
-			var Files = System.IO.Directory.EnumerateFiles(
-				Application.dataPath,
-				"*.cs",
-				SearchOption.AllDirectories);
-			foreach (string F in Files)
-			{
-				if (F.Contains("Editor"))
-				{
-					continue;
-				}
-
-				try
-				{
-					ProcessFile(F, AutoDisposables);
-				}
-				catch (Exception e)
-				{
-					Debug.LogError(e.ToString());
-				}
-			}
+			DoGenerateCode();
 		}
 	}
 
 	public static void OnRegenerateCodeRequested()
 	{
-		CompilationPipelineOncompilationStarted(null);
+		DoGenerateCode();
 	}
 
 	public static void OnClearGeneratedCodeRequested()
