@@ -8,7 +8,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEditor;
-using UnityEditor.Build.Content;
 using UnityEngine;
 using File = System.IO.File;
 
@@ -42,7 +41,17 @@ class MeowCodeHooks : Editor
 	}
 
 
-	static void SkipBlock(ref List<Token>.Enumerator Enum)
+	private static void SkipWhiteSpace(string Source, ref int Start, ref int Cur)
+	{
+		while (Cur < Source.Length && (Source[Start] == ' ' || Source[Start] == '\t'))
+		{
+			Start++;
+			Cur++;
+		}
+	}
+
+
+	private static void SkipBlock(ref List<Token>.Enumerator Enum)
 	{
 		if (Enum.Current.text != "{") return;
 
@@ -63,7 +72,7 @@ class MeowCodeHooks : Editor
 	private static void ProcessFile(string fileName, Dictionary<string, DispoableClassData> knownDisposables)
 	{
 		string[] allLines =File.ReadAllLines(fileName);
-
+		
 		var original = new List<string>();
 
 		bool bInMeowBlock = false;
@@ -91,19 +100,11 @@ class MeowCodeHooks : Editor
 			int start = 0;
 			int cur = 0;
 			
-			while (cur < s.Length && (s[start] == ' ' || s[start] == '\t'))
-			{
-				start++;
-				cur++;
-			}
+			SkipWhiteSpace(s, ref start, ref cur);
 
 			while (cur < s.Length-1)
 			{
-				while (cur < s.Length-1 && (s[start] == ' ' || s[start] == '\t'))
-				{
-					start++;
-					cur++;
-				}
+				SkipWhiteSpace(s, ref start, ref cur);
 
 				bool bComment = false;
 				while (cur < s.Length-1)
@@ -150,11 +151,7 @@ class MeowCodeHooks : Editor
 						start = cur;
 						
 						// Skip whitespace, just in case.
-						while (cur < s.Length-1 && (s[start] == ' ' || s[start] == '\t'))
-						{
-							start++;
-							cur++;
-						}
+						SkipWhiteSpace(s, ref start, ref cur);
 					}
 					else
 					{
@@ -187,6 +184,7 @@ class MeowCodeHooks : Editor
 		}
 		/* */
 
+		//var linesOfCreateMember = new Dictionary<int>()
 		var linesOfConstructors = new HashSet<int>();
 		string className = "";
 		int lineOfDisposeEnd = -1;
@@ -219,7 +217,7 @@ class MeowCodeHooks : Editor
 
 				Enum.MoveNext();
 
-				Debug.Log($"{Enum.Current.text}");
+				//Debug.Log($"{Enum.Current.text}");
 				if (Enum.Current.text == "<")
 				{
 					while (Enum.Current.text != ">")
@@ -236,7 +234,7 @@ class MeowCodeHooks : Editor
 					do
 					{
 						Enum.MoveNext();
-						Debug.Log($"{Enum.Current.text}");
+						//Debug.Log($"{Enum.Current.text}");
 
 						if (Enum.Current.text == "IDisposable")
 						{
@@ -245,11 +243,11 @@ class MeowCodeHooks : Editor
 						}
 
 						Enum.MoveNext();
-						Debug.Log($"{Enum.Current.text}");
+						//Debug.Log($"{Enum.Current.text}");
 					} while (Enum.Current.text == ",");
 				}
 				
-				Debug.Log($"{Enum.Current.text}");
+				//Debug.Log($"{Enum.Current.text}");
 				while (Enum.Current.text == "where")
 				{
 					Enum.MoveNext();
@@ -350,7 +348,7 @@ class MeowCodeHooks : Editor
 					generated.Add("#region " + key);
 					foreach (var disp in knownDisposables[className].DisposableMembers)
 					{
-						generated.Add($"\tprivate bool _meowDisposed_{disp.Name};");
+						generated.Add($"\tprivate bool _meowInitialized_{disp.Name};");
 					}
 
 					if (isClass)
@@ -365,10 +363,10 @@ class MeowCodeHooks : Editor
 					generated.Add("\t{");
 					foreach (var disp in knownDisposables[className].DisposableMembers)
 					{
-						generated.Add($"\t\tif (!_meowDisposed_{disp.Name})");
+						generated.Add($"\t\tif (_meowInitialized_{disp.Name})");
 						generated.Add("\t\t{");
 						generated.Add($"\t\t\t{disp.Name}.Dispose();");
-						generated.Add($"\t\t\t_meowDisposed_{disp.Name} = true;");
+						generated.Add($"\t\t\t_meowInitialized_{disp.Name} = false;");
 						generated.Add("\t\t}");
 					}
 					generated.Add("\t}");
@@ -395,7 +393,7 @@ class MeowCodeHooks : Editor
 					generated.Add("#region " + key);
 					foreach (var disp in knownDisposables[className].DisposableMembers)
 					{
-						generated.Add($"\t\t_meowDisposed_{disp.Name} = false;");
+						generated.Add($"\t\t_meowInitialized_{disp.Name} = false;");
 					}
 
 					generated.Add("#endregion " + key);
